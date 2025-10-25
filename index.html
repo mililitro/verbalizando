@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Verbalizando</title>
+
+<!-- bibliotecas -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.1/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+
+<style>
+:root{
+  --azul-escuro:#0a0a0a;
+  --azul-claro:#7a8dd9;
+  --texto:#f5f5f5;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font-family:"Poppins",sans-serif;background:var(--azul-escuro);color:var(--texto);
+  display:flex;flex-direction:column;align-items:center;justify-content:flex-start;min-height:100vh;overflow-y:auto;position:relative;
+  scroll-behavior:smooth;
+}
+body::before,body::after{content:"";position:fixed;border-radius:50%;z-index:0}
+body::before{width:80vmin;height:80vmin;background:radial-gradient(circle at 15% 15%,#1a2b6d,#0a0a0a);top:-20vmin;right:-10vmin}
+body::after{width:70vmin;height:70vmin;background:radial-gradient(circle at 85% 85%,#475ea8,#0a0a0a);bottom:-15vmin;left:-10vmin}
+
+header{position:absolute;top:10px;left:10px;background:#2f4fa2;padding:6px 12px;border-radius:10px;font-weight:700;z-index:2}
+header small{display:block;font-size:0.8rem;color:#ccc}
+
+.main-container{display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:80vh;width:100%;text-align:center;z-index:1;padding:20px}
+h1{font-family:Georgia,serif;font-size:clamp(2.5rem,7vw,5rem);margin:0 0 18px}
+h1 span{display:block}
+.buttons{display:flex;flex-direction:column;gap:15px;z-index:1}
+button{background:var(--azul-claro);color:#fff;border:none;padding:14px 25px;border-radius:40px;font-size:1.05rem;cursor:pointer;width:260px;transition:all .18s}
+button:hover{filter:brightness(.95);transform:translateY(-1px)}
+button .emoji{font-size:1.4rem;margin-right:8px;vertical-align:middle}
+
+#leitor{display:none;width:100%;max-width:920px;margin:0 auto;padding:18px;z-index:2}
+#cameraPreview{width:90%;max-width:700px;border-radius:12px;border:3px solid var(--azul-claro);display:block;margin:0 auto}
+.camera-controls{display:flex;gap:10px;justify-content:center;margin-top:10px}
+
+#visualizador{
+  width:100%;max-width:900px;margin:18px auto 8px;background:#fff;color:#000;
+  border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(0,0,0,0.25);overflow:auto;max-height:72vh;position:relative;
+}
+.loader-overlay{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:rgba(10,10,10,0.5);border-radius:12px;z-index:5;
+}
+.loader{border:4px solid #eee;border-top:4px solid var(--azul-claro);border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite}
+@keyframes spin{100%{transform:rotate(360deg)}}
+
+.pdf-page{margin-bottom:18px;display:flex;flex-direction:column;gap:8px;align-items:center}
+.pdf-page canvas{max-width:100%;height:auto;border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,.12)}
+.pdf-text{width:92%;max-width:860px;color:#000;text-align:left;white-space:pre-wrap;font-size:0.95rem;line-height:1.45;padding:8px 12px;border-radius:6px}
+
+.docx-content{color:#000;text-align:left;font-size:1rem;line-height:1.5}
+.docx-content img{max-width:100%;height:auto}
+
+.controls-bottom{display:flex;gap:12px;justify-content:center;margin-top:12px}
+#lerSelecao{background:#2b8aef}
+#lerTudo{background:#4b9e3b}
+#pararLeitura{background:#c53939}
+#voltar{background:#777}
+
+@media(max-width:600px){
+  button{width:86vw;max-width:320px}
+  #visualizador{max-height:62vh;padding:10px}
+}
+</style>
+</head>
+<body>
+
+<header>Verbalizando<br><small>transformar textos em áudios acessíveis</small></header>
+
+<div class="main-container" id="inicio">
+  <h1><span>Verba-</span><span>Lizando</span></h1>
+  <div class="buttons">
+    <button id="btnScan"><span class="emoji">📷</span> Escanear Documento</button>
+    <button id="btnFile"><span class="emoji">📄</span> Documento Salvo</button>
+  </div>
+</div>
+
+<div id="leitor">
+  <video id="cameraPreview" autoplay playsinline></video>
+  <div class="camera-controls">
+    <button id="alternarCamera"><span class="emoji">🔄</span> Alternar Câmera</button>
+    <button id="capturarOCR"><span class="emoji">📸</span> Capturar Texto</button>
+  </div>
+
+  <div id="visualizador" aria-live="polite" role="region"></div>
+
+  <div class="controls-bottom">
+    <button id="lerSelecao"><span class="emoji">🔊</span> Ler Seleção</button>
+    <button id="lerTudo"><span class="emoji">📢</span> Ler Tudo</button>
+    <button id="pararLeitura"><span class="emoji">⏹️</span> Parar Leitura</button>
+    <button id="voltar"><span class="emoji">⬅</span> Voltar</button>
+  </div>
+
+  <input type="file" id="fileInput" accept=".txt,.pdf,.docx" style="display:none">
+</div>
+
+<footer style="margin-top:16px;color:#ccc;font-size:0.85rem;">Criado por Maria Luisa Ribeiro, Alice Silva e Duya Tuma</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+function escapeHtml(s){return s?String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'):'';}
+function stripEmojis(t){return t?t.replace(/^[^A-Za-zÀ-ÿ0-9]+/,'').trim():'';}
+
+let audioCtx;
+function playBeep(d=120,f=1000,v=0.12){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+    o.type='sine';o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(audioCtx.destination);
+    o.start();setTimeout(()=>o.stop(),d);
+  }catch{}
+}
+
+const inicio=$('#inicio'),leitor=$('#leitor'),visualizador=$('#visualizador');
+const cameraPreview=$('#cameraPreview'),fileInput=$('#fileInput');
+const btnScan=$('#btnScan'),btnFile=$('#btnFile'),btnAlternar=$('#alternarCamera');
+const btnCapturar=$('#capturarOCR'),btnLer=$('#lerSelecao'),btnLerTudo=$('#lerTudo');
+const btnParar=$('#pararLeitura'),btnVoltar=$('#voltar');
+
+let stream=null,usandoFrontal=false;
+
+function mostrarLeitor(){inicio.style.opacity='0';setTimeout(()=>{inicio.style.display='none';leitor.style.display='block';window.scrollTo({top:0,behavior:'smooth'});},300);}
+function voltarInicio(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}leitor.style.display='none';inicio.style.display='flex';inicio.style.opacity='1';visualizador.innerHTML='';}
+
+async function iniciarCamera(){
+  try{
+    if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    const cams=devs.filter(d=>d.kind==='videoinput');
+    const hasBack=cams.some(d=>/back|traseira|environment/i.test(d.label));
+    if(!hasBack&&!usandoFrontal&&cams.length>0){alert('Nenhuma câmera traseira detectada — usando frontal.');usandoFrontal=true;}
+    const cts={video:{facingMode:usandoFrontal?'user':'environment'}};
+    stream=await navigator.mediaDevices.getUserMedia(cts);
+    cameraPreview.srcObject=stream;cameraPreview.style.transform='scaleX(1)';
+  }catch(e){alert('Erro ao acessar a câmera: '+(e.message||e));}
+}
+
+async function capturaOCR(){
+  if(!cameraPreview.videoWidth){alert('A câmera ainda não está pronta!');return;}
+  const c=document.createElement('canvas');c.width=cameraPreview.videoWidth;c.height=cameraPreview.videoHeight;
+  const ctx=c.getContext('2d');ctx.drawImage(cameraPreview,0,0);
+  visualizador.innerHTML=`<div style="text-align:center;color:#444">🔍 Processando OCR...</div>`;
+  try{
+    const r=await Tesseract.recognize(c,'por');
+    visualizador.innerHTML=`<div class="docx-content" tabindex="0">${escapeHtml(r.data.text||'Nenhum texto detectado.')}</div>`;
+  }catch(e){visualizador.innerHTML=`<div style="color:#a00">Erro no OCR: ${e.message}</div>`;}
+}
+
+async function renderPDF(buf){
+  visualizador.innerHTML='';
+  const o=document.createElement('div');
+  o.className='loader-overlay';
+  o.innerHTML='<div class="loader"></div><div style="color:#fff;margin-top:10px">Extraindo páginas...</div>';
+  visualizador.appendChild(o);
+  try{
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    visualizador.removeChild(o);
+    for(let p=1;p<=pdf.numPages;p++){
+      const page=await pdf.getPage(p);
+      const v=page.getViewport({scale:1.5});
+      const d=document.createElement('div');d.className='pdf-page';
+      const canvas=document.createElement('canvas');const ctx=canvas.getContext('2d');
+      canvas.width=v.width;canvas.height=v.height;await page.render({canvasContext:ctx,viewport:v}).promise;
+      d.appendChild(canvas);
+      const t=await page.getTextContent();const content=t.items.map(i=>i.str).join(' ');
+      const textDiv=document.createElement('div');textDiv.className='pdf-text';textDiv.tabIndex=0;textDiv.textContent=content;d.appendChild(textDiv);
+      visualizador.appendChild(d);
+    }
+  }catch(e){visualizador.innerHTML=`<div style="color:#a00">Erro ao renderizar PDF: ${e.message}</div>`;}
+}
+
+async function renderDOCX(buf){
+  visualizador.innerHTML='<div class="loader-overlay"><div class="loader"></div><div style="color:#fff;margin-top:10px">Convertendo .docx...</div></div>';
+  try{
+    const r=await mammoth.convertToHtml({arrayBuffer:buf});
+    visualizador.innerHTML=`<div class="docx-content" tabindex="0">${r.value}</div>`;
+  }catch(e){visualizador.innerHTML=`<div style="color:#a00">Erro ao abrir .docx: ${e.message}</div>`;}
+}
+
+fileInput.addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  mostrarLeitor();visualizador.innerHTML='';
+  const ext=f.name.split('.').pop().toLowerCase();
+  if(ext==='txt')visualizador.innerHTML=`<div class="docx-content" tabindex="0">${escapeHtml(await f.text())}</div>`;
+  else if(ext==='docx'){const ab=await f.arrayBuffer();await renderDOCX(ab);}
+  else if(ext==='pdf'){const ab=await f.arrayBuffer();await renderPDF(ab);}
+  else visualizador.innerHTML=`<div style="color:#a00">Formato não suportado: .${ext}</div>`;
+});
+
+function lerTudo(){
+  const t=visualizador.innerText.trim();
+  if(!t){alert('Não há texto para ler.');return;}
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);u.lang='pt-BR';speechSynthesis.speak(u);
+}
+function pararLeitura(){speechSynthesis.cancel();playBeep(120,800,0.15);}
+
+/* -------------------- Accessible button speech (corrigido: sem delay, resposta imediata) -------------------- */
+function attachAccessibleReading(button, actionFn){
+  let lastTap = 0;
+  let tapTimer = null;
+
+  // fala imediata, sem delay
+  function speakInstant(text){
+    const txt = stripEmojis(text).trim();
+    if(!txt) return;
+    playBeep(80, 1000, 0.12);
+    // cancela apenas falas curtas anteriores (sem interromper leitura longa)
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+    }
+    const u = new SpeechSynthesisUtterance(txt);
+    u.lang = 'pt-BR';
+    speechSynthesis.speak(u);
+  }
+
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+  if (isTouch) {
+    // 📱 toque: 1 toque = fala, 2 toques = ação
+    button.addEventListener('touchstart', ev => {
+      ev.preventDefault();
+      const now = Date.now();
+      const diff = now - lastTap;
+      lastTap = now;
+
+      if (diff < 400) {
+        if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+        actionFn();
+      } else {
+        tapTimer = setTimeout(() => {
+          speakInstant(button.innerText);
+          tapTimer = null;
+        }, 250);
+      }
+    }, { passive: false });
+  } else {
+    // 💻 desktop: fala no hover/foco, ação no clique
+    button.addEventListener('mouseenter', () => {
+      speakInstant(button.innerText);
+    });
+    button.addEventListener('focus', () => {
+      speakInstant(button.innerText);
+    });
+    button.addEventListener('click', actionFn);
+  }
+}
+
+/* -------------------- Pré-aquecimento do speechSynthesis (remove delay inicial) -------------------- */
+window.addEventListener('load', () => {
+  const init = new SpeechSynthesisUtterance('');
+  init.lang = 'pt-BR';
+  speechSynthesis.speak(init);
+  // cancela imediatamente (só serve para ativar)
+  speechSynthesis.cancel();
+});
+
+
+/* conectar botões */
+attachAccessibleReading(btnScan,async()=>{mostrarLeitor();await iniciarCamera();});
+attachAccessibleReading(btnFile,()=>fileInput.click());
+attachAccessibleReading(btnAlternar,async()=>{usandoFrontal=!usandoFrontal;await iniciarCamera();});
+attachAccessibleReading(btnCapturar,capturaOCR);
+attachAccessibleReading(btnLer,()=>{const s=window.getSelection().toString().trim();if(!s){alert('Selecione um trecho.');return;}const u=new SpeechSynthesisUtterance(s);u.lang='pt-BR';speechSynthesis.speak(u);});
+attachAccessibleReading(btnLerTudo,lerTudo);
+attachAccessibleReading(btnParar,pararLeitura);
+attachAccessibleReading(btnVoltar,voltarInicio);
+
+document.addEventListener('visibilitychange',()=>{if(document.hidden)speechSynthesis.cancel();});
+</script>
+</body>
+</html>
+
